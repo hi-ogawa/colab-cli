@@ -83,12 +83,14 @@ const getExecutionOutput = async (page, cell) => {
 // Main //
 
 const pageMain = async (page, cellInput) => {
+
+  // TODO: maybe don't have to reset runtime always (optimization)
   console.log(`:: Setting up Runtime (GPU)...`);
   await setupGPU(page);
 
   while (true) {
     const status = await page.$eval('colab-connect-button #colab-connect-tooltip .colab-connect-button', e => e.textContent);
-    process.stdout.write(`${EL}${status.trim()}`);
+    process.stdout.write(`${EL}:: - ${status.trim()}`);
     if (status.match('Connected to')) {
       process.stdout.write('\n');
       break;
@@ -96,11 +98,12 @@ const pageMain = async (page, cellInput) => {
     await page.waitFor(500);
   }
 
-  console.log(`:: Running a program...`);
+  console.log(`:: Creating a cell...`);
   const cell = await createCell(page);
 
   // Write a file content into the cell
   // (using clipboard so that there's no trouble with automatic indent by notebook editor)
+  console.log(`:: Loading file content...`);
   await clipboardWrite(page, cellInput);
   await cell.click();
   await page.waitFor(500);
@@ -109,16 +112,21 @@ const pageMain = async (page, cellInput) => {
   await page.keyboard.up('Control');
 
   // Execute
+  console.log(`:: Starting execution... (see out.log)`)
   await click(cell, '.cell-execution');
-
-  // TODO: show execution unfinished execution output
 
   // Poll execution status
   while (true) {
     const state = await getExecutionStatus(cell)
-    process.stdout.write(`${EL}${state.message}`)
+    process.stdout.write(`${EL}:: - ${state.message}`)
+
+    // Log program output
+    const tmpOut = await getExecutionOutput(page, cell);
+    await util.promisify(fs.writeFile)('out.log', tmpOut)
+
+    // Check if program finished
     const breakCond =
-      state.message.match('cell executed') &&
+       state.message.match('cell executed') &&
       !state.message.match('currently executing...')
     if (breakCond) {
       process.stdout.write('\n')
@@ -159,6 +167,7 @@ const main = async () => {
   try {
     const page = (await browser.pages())[0];
 
+    // TODO: maybe waiting "networkidle2" is too long  (optimization)
     const navUrl = COLAB_URL || NEW_URL;
     console.log(`:: Navigating to ${navUrl} ...`);
     await page.goto(navUrl, { waitUntil: 'networkidle2' });
